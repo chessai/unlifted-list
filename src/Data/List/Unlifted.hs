@@ -6,6 +6,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | This module defines an API centred around linked lists of unlifted values.
 module Data.List.Unlifted
   ( UList(UNil,UCons)
   , map
@@ -29,10 +30,13 @@ import Data.Monoid (Monoid(mempty, mappend))
 #endif
 import GHC.Num ((+))
 
+-- | Function composition.
 (.) :: forall (a :: TYPE 'UnliftedRep) (b :: TYPE 'UnliftedRep) (c :: TYPE 'UnliftedRep). (b -> c) -> (a -> b) -> a -> c
 {-# INLINE (.) #-}
 (.) f g = \x -> f (g x)
 
+-- | A linked list of unlifted values. The values stored in the list
+--   are guaranteed to not be thunks.
 data UList (a :: TYPE 'UnliftedRep) where
   UNil  :: UList a
   UCons :: a -> UList a -> UList a
@@ -48,6 +52,11 @@ instance Monoid (UList a) where
 #endif
 #endif
 
+-- | 'map' @f xs@ is the list obtained by applying @f@ to each element
+-- of @xs@, i.e.,
+--
+-- > map f [x1, x2, ..., xn] == [f x1, f x2, ..., f xn]
+-- > map f [x1, x2, ...] == [f x1, f x2, ...]
 map :: (a -> b) -> UList a -> UList b
 {-# NOINLINE [0] map #-}
 map _ UNil = UNil
@@ -68,6 +77,11 @@ augment :: forall a. (forall b. (a -> b -> b) -> b -> b) -> UList a -> UList a
 {-# INLINE [1] augment #-}
 augment g xs = g UCons xs
 
+-- | 'foldr', applied to a binary operator, a starting value (typically
+-- the right-identity of the operator), and a list, reduces the list
+-- using the binary operator, from right to left:
+--
+-- > foldr f z [x1, x2, ..., xn] == x1 `f` (x2 `f` ... (xn `f` z)...)
 foldr :: (a -> b -> b) -> b -> UList a -> b
 {-# INLINE [0] foldr #-}
 foldr k z = go
@@ -75,6 +89,13 @@ foldr k z = go
     go UNil = z
     go (UCons y ys) = y `k` go ys
 
+-- | 'foldl', applied to a binary operator, a starting value (typically
+-- the left-identity of the operator), and a list, reduces the list
+-- using the binary operator, from left to right:
+--
+-- > foldl f z [x1, x2, ..., xn] == (...((z `f` x1) `f` x2) `f`...) `f` xn
+--
+-- The list must be finite.
 foldl :: forall a b. (b -> a -> b) -> b -> UList a -> b
 {-# INLINE foldl #-}
 foldl k z0 xs = foldr
@@ -83,6 +104,7 @@ foldl k z0 xs = foldr
   xs
   z0
 
+-- | A strict version of 'foldl'.
 foldl' :: forall a b. (b -> a -> b) -> b -> UList a -> b
 {-# INLINE foldl' #-}
 foldl' k z0 xs = foldr
@@ -91,10 +113,22 @@ foldl' k z0 xs = foldr
   xs
   z0
 
+-- | Test whether a list is empty.
 null :: UList a -> Bool
 null UNil = True
 null _    = False
 
+-- | 'scanl' is similar to 'foldl', but returns a list of successive
+-- reduced values from the left:
+--
+-- > scanl f z [x1, x2, ...] == [z, z `f` x1, (z `f` x1) `f` x2, ...]
+--
+-- Note that
+--
+-- > last (scanl f z xs) == foldl f z xs.
+
+-- This peculiar arrangement is necessary to prevent scanl being rewritten in
+-- its own right-hand side.
 scanl :: (b -> a -> b) -> b -> UList a -> UList b
 {-# NOINLINE [1] scanl #-}
 scanl = scanlGo
@@ -123,6 +157,12 @@ scanlFB :: forall (a :: TYPE 'UnliftedRep)
                   (b -> a -> b) -> (b -> c -> c) -> a -> (b -> c) -> b -> c
 scanlFB f c = \b g -> oneShot (\x -> let b' = f x b in b' `c` g b')
 
+-- | Append two lists, i.e.,
+--
+-- > [x1, ..., xm] ++ [y1, ..., yn] == [x1, ..., xm, y1, ..., yn]
+-- > [x1, ..., xm] ++ [y1, ...] == [x1, ..., xm, y1, ...]
+--
+-- If the first list is not finite, the result is the first list.
 (++) :: UList a -> UList a -> UList a
 {-# NOINLINE [1] (++) #-}
 (++) UNil ys = ys
@@ -132,6 +172,10 @@ scanlFB f c = \b g -> oneShot (\x -> let b' = f x b in b' `c` g b')
 "++" [~1] forall xs ys. xs ++ ys = augment (\c n -> foldr c n xs) ys
   #-}
 
+-- | 'filter', applied to a predicate and a list, returns the list of
+-- those elements that satisfy the predicate; i.e.,
+--
+-- > filter p xs = [ x | x <- xs, p x]
 filter :: (a -> Bool) -> UList a -> UList a
 {-# NOINLINE [1] filter #-}
 filter _ UNil = UNil
@@ -139,6 +183,7 @@ filter pred (UCons x xs) = if pred x
   then UCons x (filter pred xs)
   else filter pred xs
 
+-- | /O(n)/. 'length' returns the length of a finite list as an 'Int'.
 length :: UList a -> Int
 {-# NOINLINE [1] length #-}
 length xs = lenAcc xs 0
