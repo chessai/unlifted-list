@@ -6,6 +6,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+{-# OPTIONS_GHC -Wall -Werror #-}
+
 -- | This module defines an API centred around linked lists of unlifted values.
 module Data.List.Unlifted
   ( UList(UNil,UCons)
@@ -18,8 +20,17 @@ module Data.List.Unlifted
   , filter
   , length
   , (.)
+  , singleton
+  , pure
+  , cons
+  , traverse_
+  , concat
+  , concatMap
+  , foldMap
   ) where
 
+import qualified Control.Applicative as A
+import qualified Data.Foldable as F
 import GHC.Prim
 import GHC.Types
 import GHC.Magic (oneShot)
@@ -148,7 +159,7 @@ scanl = scanlGo
 
 tail :: UList a -> UList a
 tail UNil = UNil
-tail (UCons x xs) = xs
+tail (UCons _ xs) = xs
 
 {-# INLINE [0] scanlFB #-}
 scanlFB :: forall (a :: TYPE 'UnliftedRep)
@@ -197,13 +208,42 @@ lenAcc (UCons _ ys) n = lenAcc ys (n + 1)
 "mapList" [1] forall f. foldr (mapFB UCons f) UNil = map f
 "mapFB" forall c f g. mapFB (mapFB c f) g = mapFB c (f . g)
 "mapFB/id" forall c. mapFB c (\x -> x) = c
-  #-}
+#-}
 
 -- Coercible (a :: Type) (b :: Type)
 -- {-# RULES "map/coerce" [1] map coerce = coerce #-}
 
 -- This needs something like `class Eq (a :: TYPE 'UnliftedRep)`
---elem :: a -> UList a -> Bool
---elem _ UNil = False
---elem x (y:ys) = x == y || elem x ys
+-- elem :: a -> UList a -> Bool
+-- elem _ UNil = False
+-- elem x (y:ys) = x == y || elem x ys
+
+pure, singleton :: a -> UList a
+singleton a = UCons a UNil 
+pure = singleton
+
+cons :: a -> UList a -> UList a
+cons = UCons
+
+traverse_ :: forall f a b. A.Applicative f => (a -> f b) -> UList a -> f ()
+traverse_ f = foldr seqd (A.pure ())
+  where
+  seqd :: a -> f () -> f ()
+  seqd a = (A.*>) (f a)
+
+-- | The concatenation of all the elements of a container of ULists.
+concat :: F.Foldable t => t (UList a) -> (UList a)
+concat xs = build (\f a -> F.foldr (\x y -> foldr f y x) a xs)
+{-# INLINE concat #-}
+
+-- | Map a function over all the elements of a container and concatenate
+-- the resulting ULists.
+concatMap :: F.Foldable t => (a -> UList b) -> t a -> UList b
+concatMap f xs = build (\c n -> F.foldr (\x b -> foldr c b (f x)) n xs)
+{-# INLINE concatMap #-}
+
+foldMap :: Monoid m => (a -> m) -> UList a -> m
+foldMap f = foldr fun mempty
+  where
+  fun x = mappend (f x)
 
